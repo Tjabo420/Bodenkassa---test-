@@ -301,10 +301,55 @@ function showReturnConfirmation(studentName,itemName,itemEmoji){
 }
 function returnLoan(id){const n=db.loans.findIndex(l=>l.id===id);if(n<0)return;const l=db.loans[n];const s=studentOf(l.studentId),i=itemOf(l.itemId);if(!safeMutation(()=>{db.loans.splice(n,1);db.history.push({type:'return',...l,loanAt:l.at,returnedAt:new Date().toISOString(),studentName:s?.name||'Okänd elev',itemName:i?.name||'Borttagen sak',itemEmoji:i?.emoji||'📦',group:s?.group||''})}))return;undo={type:'return',loan:l};render();showReturnConfirmation(s?.name||'Elev',i?.name||'Sak',i?.emoji||'📦')}
 function undoLast(){if(!undo)return;if(undo.type==='lend'){db.loans=db.loans.filter(l=>l.id!==undo.loan.id)}else if(!db.loans.some(l=>l.id===undo.loan.id)){db.loans.push(undo.loan)}db.history.push({type:'undo',id:undo.loan.id,at:new Date().toISOString()});undo=null;save();render();showToast('Senaste åtgärden ångrad')}
-function renderReturn(){let filtered=db.loans.filter(l=>!returnItem||l.itemId===returnItem).filter(l=>{let s=studentOf(l.studentId),i=itemOf(l.itemId),q=returnSearch.toLowerCase();return !q||s?.name.toLowerCase().includes(q)||i?.name.toLowerCase().includes(q)});$('screen').innerHTML=`<div class="layout"><section class="panel"><h2>↩️ Expressåterlämning</h2><p class="muted">1. Tryck på bilden av saken som lämnas tillbaka. 2. Tryck på <b>Åter</b> bredvid elevens namn.</p><div class="returnitems"><button class="returnitem ${!returnItem?'active':''}" onclick="setReturnItem('')"><span class="emoji">📦</span>Alla saker<span class="num">${db.loans.length} lån</span></button>${db.items.filter(i=>db.loans.some(l=>l.itemId===i.id)).map(i=>`<button class="returnitem ${returnItem===i.id?'active':''}" onclick="setReturnItem('${esc(i.id)}')">${itemVisual(i)}${esc(i.name)}<span class="num">${db.loans.filter(l=>l.itemId===i.id).length} utlånade</span></button>`).join('')}</div><input class="search" placeholder="🔎 Filtrera på elev eller sak..." value="${esc(returnSearch)}" oninput="setReturnSearch(this.value)"><div class="list" id="returnList">${filtered.map(l=>loanRow(l)).join('')||'<div class="empty">Inga matchande lån 🎉</div>'}</div></section><aside class="panel"><h2>Snabb återlämning</h2><p>Det går att återlämna utan att söka igenom alla 300 elever. Välj bara saken och rätt elev.</p><div class="selected">📦 ${db.loans.length} saker är just nu utlånade</div>${undo?'<p><button class="btn secondary" onclick="undoLast()">↶ Ångra senaste åtgärden</button></p>':''}</aside></div>`}
+const LOW_GROUPS=new Set(['G1','G2','G13','G14','G11','G12','G9','G10']);
+function loanSchoolStage(l){
+ const student=studentOf(l.studentId);
+ return student&&LOW_GROUPS.has(student.group)?'low':'mid';
+}
+function stageLoanList(which){return db.loans.filter(l=>loanSchoolStage(l)===which)}
+// Rastbyte sker enbart när en elev trycker på knappen, aldrig automatiskt efter klockan.
+const RETURN_STAGE_KEY='boden-return-stage-326';
+let returnStage=localStorage.getItem(RETURN_STAGE_KEY)==='mid'?'mid':'low';
+function setReturnStage(which){
+ if(which!=='low'&&which!=='mid')return;
+ returnStage=which;
+ try{localStorage.setItem(RETURN_STAGE_KEY,which)}catch(e){}
+ returnItem='';returnSearch='';render();
+}
+function switchReturnStage(){setReturnStage(returnStage==='low'?'mid':'low')}
+function returnStageTabs(){
+ const low=stageLoanList('low').length,mid=stageLoanList('mid').length;
+ return `<div class="stage-picker" style="margin:0 0 18px;display:flex;gap:10px;flex-wrap:wrap">
+ <button class="stage-btn ${returnStage==='low'?'active':''}" onclick="setReturnStage('low')">🏫 Lågstadiet <span>${low} kvar att lämna tillbaka</span></button>
+ <button class="stage-btn ${returnStage==='mid'?'active':''}" onclick="setReturnStage('mid')">🏫 Mellanstadiet <span>${mid} kvar att lämna tillbaka</span></button></div>`;
+}
+function renderReturn(){
+ const all=stageLoanList(returnStage);
+ const filtered=all.filter(l=>!returnItem||l.itemId===returnItem).filter(l=>{
+  const st=studentOf(l.studentId),item=itemOf(l.itemId),q=returnSearch.toLocaleLowerCase('sv-SE');
+  return !q||(st?.name||'').toLocaleLowerCase('sv-SE').includes(q)||(item?.name||'').toLocaleLowerCase('sv-SE').includes(q);
+ });
+ const label=returnStage==='low'?'Lågstadiet':'Mellanstadiet';
+ $('screen').innerHTML=`<div class="layout"><section class="panel"><h2>↩️ Expressåterlämning – ${label}</h2>
+ <p class="muted">Byt rast med knappen när ni är redo, oavsett klockslag. Lån från den andra delen ligger kvar tills de lämnas tillbaka.</p>
+ ${returnStageTabs()}
+ <button class="btn primary" style="width:100%;margin:0 0 16px;min-height:68px;font-size:clamp(18px,2.5vw,25px)" onclick="switchReturnStage()">🔄 Byt rast till ${returnStage==='low'?'mellanstadiet':'lågstadiet'} →</button>
+ <p class="muted">1. Tryck på bilden av saken som lämnas tillbaka. 2. Tryck på <b>Åter</b> bredvid elevens namn.</p>
+ <div class="returnitems"><button class="returnitem ${!returnItem?'active':''}" onclick="setReturnItem('')"><span class="emoji">📦</span>Alla saker<span class="num">${all.length} lån</span></button>
+ ${db.items.filter(i=>all.some(l=>l.itemId===i.id)).map(i=>`<button class="returnitem ${returnItem===i.id?'active':''}" onclick="setReturnItem('${esc(i.id)}')">${itemVisual(i)}${esc(i.name)}<span class="num">${all.filter(l=>l.itemId===i.id).length} utlånade</span></button>`).join('')}</div>
+ <input class="search" placeholder="🔎 Filtrera på elev eller sak..." value="${esc(returnSearch)}" oninput="setReturnSearch(this.value)">
+ <div class="list" id="returnList">${filtered.map(l=>loanRow(l)).join('')||'<div class="empty">Inga matchande lån i den här delen 🎉</div>'}</div></section>
+ <aside class="panel"><h2>Snabb återlämning</h2><p>Välj rätt skolstadium, sedan saken och eleven. Rastbytet sker bara när ni trycker på knappen.</p>
+ <div class="selected">📦 ${all.length} utlånade i ${label.toLowerCase()} · ${db.loans.length} totalt</div>
+ ${undo?'<p><button class="btn secondary" onclick="undoLast()">↶ Ångra senaste åtgärden</button></p>':''}</aside></div>`;
+}
 function setReturnItem(id){returnItem=id;render()}
 function setReturnSearch(v){returnSearch=v;render();const e=$('screen').querySelector('.search');e.focus();e.setSelectionRange(v.length,v.length)}
-function renderActive(){let loans=db.loans.slice().reverse();$('screen').innerHTML=`<div class="panel"><div class="row"><h2>📋 Aktiva lån (${loans.length})</h2><button class="btn secondary small" onclick="changeTab('return')">Gå till återlämning →</button></div><div class="list">${loans.map(l=>activeLoanRow(l)).join('')||'<div class="empty">Alla saker är tillbaka 🎉</div>'}</div></div>`}
+function renderActive(){
+ const loans=stageLoanList(returnStage).slice().reverse();
+ $('screen').innerHTML=`<div class="panel"><div class="row"><h2>📋 Aktiva lån – ${returnStage==='low'?'Lågstadiet':'Mellanstadiet'} (${loans.length})</h2><button class="btn secondary small" onclick="changeTab('return')">Gå till återlämning →</button></div>
+ ${returnStageTabs()}<button class="btn primary" style="width:100%;margin:0 0 16px" onclick="switchReturnStage()">🔄 Byt rast till ${returnStage==='low'?'mellanstadiet':'lågstadiet'} →</button><div class="list">${loans.map(l=>activeLoanRow(l)).join('')||'<div class="empty">Alla saker är tillbaka i den här delen 🎉</div>'}</div></div>`;
+}
 
 function historyDate(value){
  if(!value)return 'Tidpunkt saknas';

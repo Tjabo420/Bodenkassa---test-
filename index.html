@@ -305,6 +305,24 @@ function renderBodenSchedule(){
  return `<section class="boden-schedule" aria-label="Bodenschema"><h2>📅 Bodenschema</h2><p>${today?`Idag, ${BODEN_DAYS[day]} – vilka står i Boden?`:'Veckans gruppfördelning'}</p>${cards}<details><summary>🗓️ Visa hela Bodenschemat</summary><img src="${BODEN_POSTER}" alt="Bodenschema måndag till fredag med fyra rastpass per dag"></details></section>`;
 }
 
+// Sortera utlåningsknapparna efter faktisk användning, utan att visa antalet i elevläget.
+// Ångrade utlåningar räknas inte. En ångrad återlämning tar inte bort ursprungslånet.
+function popularItemsFirst(){
+ const counts=new Map(),lastAction=new Map(),cancelled=new Set();
+ for(const event of (db.history||[])){
+  if(!event||!event.id)continue;
+  if(event.type==='lend'||event.type==='return')lastAction.set(event.id,event.type);
+  else if(event.type==='undo'&&lastAction.get(event.id)==='lend')cancelled.add(event.id);
+ }
+ for(const event of (db.history||[])){
+  if(event?.type==='lend'&&!cancelled.has(event.id)&&event.itemId)
+   counts.set(event.itemId,(counts.get(event.itemId)||0)+1);
+ }
+ // Stabil sortering: vid lika många lån behålls befintlig ordning.
+ return db.items.map((item,index)=>({item,index})).sort((a,b)=>
+  (counts.get(b.item.id)||0)-(counts.get(a.item.id)||0)||a.index-b.index
+ ).map(x=>x.item);
+}
 function renderLoan(){
 const student=studentOf(studentId);
 let main='';
@@ -318,7 +336,7 @@ if(!stage){
  main=`<div class="stephead"><button class="btn secondary small" onclick="chooseGroup('')">← Tillbaka</button><span>${info[0]} · ${info[1]}</span></div><h2>👤 Steg 3 av 3 – Välj ditt namn</h2><input class="search" id="search" placeholder="🔎 Sök ditt namn..." value="${esc(search)}" oninput="setSearch(this.value)">${studentButtons()}`;
 }else{
  const info=GROUPS.find(g=>g[0]===student.group);
- main=`<div class="stephead"><button class="btn secondary small" onclick="clearStudent()">← Byt elev</button><span>${info?.[0]||''} · ${info?.[1]||''}</span></div><h2>⚽ Välj vad du vill låna</h2><div class="selected selected-big">👤 ${esc(student.name)} <small>${info?.[0]||''} · ${info?.[1]||''}</small></div><div class="items">${db.items.map(i=>`<button class="item ${available(i)===0?'out':''}" ${available(i)===0?'disabled':''} onclick="lend('${esc(i.id)}')">${itemVisual(i)}<strong>${esc(i.name)}</strong><span class="stock">${available(i)?available(i)+' kvar':'SLUT'}</span></button>`).join('')}</div><p class="muted">Efter ett lån kommer du automatiskt tillbaka till gruppvalet för nästa elev.</p>`;
+ main=`<div class="stephead"><button class="btn secondary small" onclick="clearStudent()">← Byt elev</button><span>${info?.[0]||''} · ${info?.[1]||''}</span></div><h2>⚽ Välj vad du vill låna</h2><div class="selected selected-big">👤 ${esc(student.name)} <small>${info?.[0]||''} · ${info?.[1]||''}</small></div><div class="items">${popularItemsFirst().map(i=>`<button class="item ${available(i)===0?'out':''}" ${available(i)===0?'disabled':''} onclick="lend('${esc(i.id)}')">${itemVisual(i)}<strong>${esc(i.name)}</strong><span class="stock">${available(i)?available(i)+' kvar':'SLUT'}</span></button>`).join('')}</div><p class="muted">Efter ett lån kommer du automatiskt tillbaka till gruppvalet för nästa elev.</p>`;
 }
 $('screen').innerHTML=`<div class="loan-full-layout"><section class="panel loan-full-panel">${main}${undo?'<div class="loan-bottom-actions"><button class="btn secondary" onclick="undoLast()">↶ Ångra senaste åtgärden</button></div>':''}</section></div>`;
 }
